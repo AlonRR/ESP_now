@@ -1,16 +1,10 @@
-#include "main.h"
+#include "main.hpp"
 #ifdef RECIVER_MODE
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <String.h>
-
-struct _datapacket
-{
-    int value;
-    String message;
-} packet;
 
 // Callback when data is recieved
 void OnDataRecieve(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
