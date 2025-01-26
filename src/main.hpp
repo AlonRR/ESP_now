@@ -21,4 +21,4 @@ enum Mode
     OTHER
 };
 
-#endif
+#endif // MAIN_HPP
