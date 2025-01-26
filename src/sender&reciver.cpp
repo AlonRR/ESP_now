@@ -1,37 +1,19 @@
-#include "main.h"
-#ifdef SEND_RECIVE_MODE
-#include <Arduino.h>
-#include <WiFi.h>
-struct _datapacket
-{
-    int value;
-    String message;
-};
+#include "sender&reciver.hpp"
 
-void OnDataRecieve(const uint8_t *mac_addr, const uint8_t *incomingData, int len);
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t sendStatus);
-void sendSensorData(int value, const uint8_t *mac_addr);
-void sendSensorRequest(const uint8_t *mac_addr);
-int readSensor();
-// void sender(_datapacket *s_packet, const uint8_t *mac_addr);
-// void verbosePrint(const uint8_t *mac_addr, String message, int val = 0);
-void doOledStuff(_datapacket *incomingData);
-
-enum Mode
-{
-    MASTER = 0,
-    SLAVE
-};
 Mode mode;
-
+// esp_now_peer_info_t brodcastAddress;
 esp_now_peer_info_t yigalInfo;
 uint8_t yigalAddress[] = {0xC4, 0x5B, 0xBE, 0x8D, 0xBC, 0x8C};
+_datapacket s_packet;
+_datapacket r_packet;
 
 void setup()
 {
     Serial.begin(115200);
+    u8g2_prepare();
     WiFi.mode(WIFI_STA);
-    // Init ESP-NOW
+    Serial.println(WiFi.macAddress());
+
     if (esp_now_init() != 0)
     {
         Serial.println("Error initializing ESP-NOW");
@@ -39,92 +21,76 @@ void setup()
     }
 
     esp_now_register_recv_cb(OnDataRecieve);
-    esp_now_register_send_cb(OnDataSent);
+    esp_now_register_send_cb(OnDataSend);
+
+    pinMode(HUMIDITY_SENSOR_PIN, INPUT);
+    pinMode(PUSH_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(SWITCH_PIN, INPUT_PULLUP);
+
     memcpy(yigalInfo.peer_addr, yigalAddress, 6);
     yigalInfo.channel = 1;
     yigalInfo.encrypt = false;
     esp_now_add_peer(&yigalInfo);
+    // brodcastAddress.encrypt = false;
+    // brodcastAddress.peer_addr = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
     mode = SLAVE;
 }
 
 void loop()
 {
+    char *message;
+    int val;
+    if (mode == SLAVE)
+    {
+        message = (char *)" SLAVE";
+    }
     if (mode == MASTER)
     {
+        message = (char *)" MASTER";
         sendSensorRequest(yigalAddress);
-        delay(5000);
     }
+    u8g2.drawStr(0, 1, message);
+    u8g2.sendBuffer();
+    delay(1000);
 }
 
 int readSensor()
 {
-    static int value = 0;
+    static unsigned char value = 0;
+    // value = analogRead(LIGHT_SENSOR_PIN);
     value += 1;
     return value;
 }
 
-void setupTempSensor(){
-#ifdef TEMP_SENSOR_PIN
-    #define TEMP_SENSOR_PIN
-    pinMode(TEMP_SENSOR_PIN, INPUT);
-#endif
-}
-
-int readTemp(){
-
-}
-
-void doOledStuff(_datapacket *incomingData)
-{
-    Serial.printf("Value: %d\n", incomingData->value);
-    Serial.printf("Message: %s\n", incomingData->message);
-}
-
 void sendSensorRequest(const uint8_t *mac_addr)
 {
-    _datapacket s_packet;
-    s_packet.value = 1;
-    s_packet.message = "Request";
-    // sender(&s_packet, mac_addr);
-    esp_now_send(mac_addr, (uint8_t *)&s_packet, (sizeof(s_packet) + s_packet.message.length() * sizeof(char)));
-    // Serial.printf("MAC: %x:%x:%x:%x:%x:%x\t",
-    //               mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-    // Serial.printf("Sent %d -", s_packet.value);
-    // Serial.printf("Message: %s\n", s_packet.message);
+    r_packet.value = 1;
+    // strcpy(r_packet.message, "Request");
+    r_packet.message = "Request";
+    esp_now_send(mac_addr, (uint8_t *)&r_packet, (sizeof(r_packet)));
 }
-
-//
 
 void sendSensorData(int value, const uint8_t *mac_addr)
 {
-    _datapacket s_packet;
     s_packet.value = value;
-    s_packet.message = "Sensor data";
-    for (int i = 0; i < value; i++)
-        s_packet.message += value;
-    // sender(&s_packet, mac_addr);
-    esp_now_send(mac_addr, (uint8_t *)&s_packet,
-                 (sizeof(s_packet) + s_packet.message.length() * sizeof(char)));
+    s_packet.message = (char *)"Sensor data";
+    esp_now_send(mac_addr, (uint8_t *)&s_packet, (sizeof(s_packet) + sizeof(s_packet.message) * sizeof(char)));
 }
 
 // Callback when data is recieved
 void OnDataRecieve(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
 {
     int value;
-    String buffer;
-    Serial.printf("Recieved from %x:%x:%x:%x:%x:%x %d bytes ...",
-                  mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5], len);
-
-    Serial.printf("Value: %d\n", ((struct _datapacket *)incomingData)->value);
-    buffer = ((struct _datapacket *)incomingData)->message;
-    Serial.printf("Message: %s\n", buffer);
-    if (mode == SLAVE && ((struct _datapacket *)incomingData)->value == 1)
+#ifdef VERBOSE
+    verbosePrint(mac_addr, incomingData, len);
+#endif
+    if (mode == SLAVE)
     {
         value = readSensor();
         sendSensorData(value, mac_addr);
         return;
     }
-    if (mode == MASTER && ((struct _datapacket *)incomingData)->value == 69)
+    if (mode == MASTER)
     {
         doOledStuff((struct _datapacket *)incomingData);
         return;
@@ -132,32 +98,23 @@ void OnDataRecieve(const uint8_t *mac_addr, const uint8_t *incomingData, int len
 }
 
 // Callback when data is sent
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t sendStatus)
+void OnDataSend(const uint8_t *mac_addr, esp_now_send_status_t sendStatus)
 {
+#ifdef VERBOSE
     if (sendStatus == 0)
         Serial.print("Delivery success");
     else
         Serial.print("Delivery fail");
-    Serial.printf("MAC: %x:%x:%x:%x:%x:%x\n",
+    Serial.printf("\tMAC: %x:%x:%x:%x:%x:%x\n",
                   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+#endif
 }
 
-// void verbosePrint(const uint8_t *mac_addr, String message, int val = 0)
-// {
-//     Serial.printf("MAC: %x:%x:%x:%x:%x:%x\t",
-//                   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-//     if (val == 0)
-//         return;
-//     Serial.printf("Value: %d\n", val);
-//     Serial.printf("Message: %s\n", message);
-// }
-
-// void sender(_datapacket *s_packet, const uint8_t *mac_addr)
-// {
-//     esp_now_send(mac_addr, (uint8_t *)&s_packet, (sizeof(struct _datapacket) + sizeof(s_packet->message)));
-//     Serial.printf("MAC: %x:%x:%x:%x:%x:%x\t",
-//                   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-//     Serial.printf("Sent %d -", s_packet->value);
-//     Serial.printf("Message: %s\n", s_packet->message);
-// }
-#endif // SEND_RECIVE_MODE
+void verbosePrint(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
+{
+    struct _datapacket packet = *(struct _datapacket *)incomingData;
+    Serial.printf("MAC: %x:%x:%x:%x:%x:%x\t",
+                  mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+    Serial.printf("Value: %d\n", packet.value);
+    Serial.printf("message: %s\n", packet.message.c_str());
+}
