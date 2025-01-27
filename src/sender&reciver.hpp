@@ -19,8 +19,9 @@ void OnDataSend(const uint8_t *mac_addr, esp_now_send_status_t sendStatus);
 void sendSensorData(int value, const uint8_t *mac_addr);
 void sendSensorRequest(const uint8_t *mac_addr);
 int readSensor();
-void doOledStuff(_datapacket *incomingData);
 void verbosePrint(const uint8_t *mac_addr, const uint8_t *incomingData, int len);
+void verbosePrintMessage(_datapacket *incomingData);
+void changeMode(int read);
 void setup();
 void loop();
 
